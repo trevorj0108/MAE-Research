@@ -12,7 +12,7 @@ test_matrix['MAEQBlade20Degree(pt32psf)'] = ['second',100,50,25,10,9,8,7,6,5,4,3
 test_matrix['MAETHAT0Degree(pt32psf)'] = ['second',50,25,10,8,6,4,2,.8,.6,.4,.2,0]
 test_matrix['MAETHAT10Degree(pt32psf)'] = ['second',50,25,10,8,6,4,2,.8,.6,.4,.2,0]
 test_matrix['MAETHAT20Degree(pt32psf)'] = ['second',100,50,25,10,9,8,7,6,5,4,3,2,1,0]
-global test_matrix
+
 
 
 
@@ -20,6 +20,7 @@ class Dataset:
     
     # Set local filepaths as class variables
     
+    instances = set()
     oscope_folder = 'D:\\Documents\\March2024WindTunnelTesting\\'
     labview_folder = 'D:\\Documents\\THATMarch1Test_Matthew Simpson\\'
     output_destination = "D:\Documents\MAEResearchOutput"
@@ -39,10 +40,33 @@ class Dataset:
         self.output = pd.DataFrame()
         self.skew = skew
         self.blade_design = blade_design
+
+        Dataset.instances.add(self)
         
         self.get_oscilloscope_data()
         self.get_labview_data()
         self.process_data()
+        
+        
+    def __iter__(self):
+        
+        """
+        Iterator to make self callable as a tuple
+        """
+        
+        return iter((self.skew, self.blade_design))
+
+    def __eq__(self, other):
+        
+        """
+        Dunder eq made to return identical hashes for instances with the same input parameters. This way duplicates will be erased in the instances set.
+        """
+        
+        return (isinstance(other, type(self)) and (tuple(self)) == (tuple(other)))
+    
+    def __hash__(self):
+        
+        return hash(tuple(self))
         
         
         
@@ -61,7 +85,7 @@ class Dataset:
         sub_df = pd.DataFrame()
         
         # Looping by number and not just by the files themselves is needed since the folders are not in order and because some of
-        # the files have a number after 'oscope' and some don't, for ex: 'oscope3_0'
+        # the files have a number after 'oscope' and some don't, for ex: 'oscope3_0' vs 'oscope_0'
         
         for i in range(len(available_files)):
             
@@ -133,21 +157,21 @@ class Dataset:
                 dfrpm2.append(i)
         
         rpm_average = (sum(dfrpm2) / len(dfrpm2))
-        rads = rpm_average*0.104719755
+        rads = rpm_average * 0.104719755
 
         # The voltage dataset for 0 ohms was recorded at .03 ohms
         
         if resistance_ohms == 0:
             resistance_ohms = .03
             
-        power_watts = (volt_mean**2)/resistance_ohms
+        power_watts = (volt_mean**2) / resistance_ohms
 
         air_temp_f = temp
-        air_temp_k = ((air_temp_f-32)*5/9) + 273.15
+        air_temp_k = ((air_temp_f - 32) * (5 / 9)) + 273.15
 
-        atm_pressure_pascal = atm_pressure_psi*6895
+        atm_pressure_pascal = atm_pressure_psi * 6895
 
-        density = atm_pressure_pascal / ((r/molar_mass_air)*(air_temp_k))
+        density = atm_pressure_pascal / ((r / molar_mass_air) * (air_temp_k))
         
         ## ALTERNATIVE POWER CALCULATIONS
         # averages = df.mean()
@@ -155,18 +179,18 @@ class Dataset:
         # power_watts = averages[5]*rads
         
         radius_m = prop_length_m + hub_length_m
-        area = math.pi*(radius_m**2)
+        area = math.pi * (radius_m**2)
         
         # Velocity measured in m/s
-        vel = math.sqrt((2*(q*47.88))/density)
+        vel = math.sqrt((2 * (q * 47.88)) / density)
         
-        coefficient_power = (power_watts / (((.5)*density)*(area)*(vel**3)))
+        coefficient_power = (power_watts / (((.5) * density) * (area) * (vel**3)))
         
         # rads = radians / second
-        rads = rpm_average*0.104719755
+        rads = rpm_average * 0.104719755
 
         
-        tip_speed_ratio = (radius_m*rads)/vel
+        tip_speed_ratio = (radius_m * rads) / vel
 
         return [vel,rads,tip_speed_ratio,coefficient_power] 
     
@@ -180,7 +204,7 @@ class Dataset:
         This function iterates through the LabVIEW data, performing calculations with both the LabVIEW and oscilloscope data. It compiles the results into `self.output`, a DataFrame with the processed data and calculated metrics.
         """
         
-        output = pd.DataFrame(columns = ['blade#','resistor_type','dynamic_pressure(lb/sqft)','velocity(m/s)','radians/sec','tip_speed_ratio','coefficient_power'])
+        output = pd.DataFrame(columns = ['blade#','blade_design','skew_angle','resistor_type','dynamic_pressure(lb/sqft)','velocity(m/s)','radians/sec','tip_speed_ratio','coefficient_power'])
         
         for filename,df in self.labview_dict.items():
             
@@ -192,14 +216,27 @@ class Dataset:
             atm_pressure_psi = float(fsplit[3])
             resistor_type = ast.literal_eval(fsplit[1])
             volt_mean = self.oscope_df[resistor_type].mean()
-            function_output = self.cp_tsr_calculation(df,temp,atm_pressure_psi,q,resistor_type,volt_mean)
-            pendage = [blade,resistor_type,q] + function_output
+            function_output = self.cp_tsr_calculation(df, temp, atm_pressure_psi, q, resistor_type, volt_mean)
+            pendage = [blade, self.blade_design, self.skew, resistor_type, q] + function_output
             output.loc[len(output)] = pendage
             
         self.output = output
         print(f"DATA FOR SKEW={self.skew}, DESIGN='{self.blade_design}' HAS BEEN PROCESSED")
         
         return self.output
+    
+    
+    
+    @classmethod
+    def combined_instance_df(cls):
+
+        """
+        Combine DataFrames from all instances.
+        """
+        
+        dfs = [instance.output for instance in list(cls.instances)]
+        combined_df = pd.concat(dfs, ignore_index=True)
+        return combined_df        
     
     
     
@@ -218,7 +255,6 @@ class Dataset:
         print("OUTPUT DF",self.output.head())
         print("OSCOPE DF",self.oscope_df.head())
         
-
 
 
 ### MAIN ###
